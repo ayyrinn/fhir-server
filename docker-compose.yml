@@ -1,17 +1,31 @@
+version: "3.8"
 services:
   fhir-server:
     build: .
     ports:
       - "3000:3000"
     depends_on:
-      - mongodb
+      - fhir-postgres
     environment:
-      - MONGO_URI=mongodb://mongodb:27017/fhirDB
-
-  mongodb:
-    image: mongo:latest
-    container_name: mongodb
+      POSTGRES_USER: fhir_user
+      POSTGRES_PASSWORD: fhir_pass
+      POSTGRES_DB: fhir_db
     volumes:
-      - ./data:/data/db
+      - .:/usr/src/app
+    command: ["npm", "start"]
+
+  fhir-postgres:
+    image: postgres
+    container_name: fhir-postgres
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: fhir_pass
+      POSTGRES_USER: fhir_user
+      POSTGRES_DB: fhir_db
     ports:
-      - "27017:27017"
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

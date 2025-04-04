@@ -5,6 +5,7 @@ const {
 } = require("@bluehalo/node-fhir-server-core");
 const { VERSIONS } = constants;
 
+// Konfigurasi server FHIR
 let config = {
   profiles: {
     patient: {
@@ -42,9 +43,12 @@ let config = {
   },
 };
 
+// Inisialisasi server FHIR
 let server = initialize(config);
 let logger = loggers.get("default");
+const PORT = 3000;
 
-server.listen(3000, () => {
-  logger.info("✅ FHIR Server started at http://localhost:3000");
+// Menjalankan server FHIR
+server.listen(PORT, () => {
+  logger.info(`✅ FHIR Server started at http://localhost:${PORT}`);
 });
