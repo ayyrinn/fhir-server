@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@bluehalo/node-fhir-server-core": "^2.3.0",
+    "@supabase/supabase-js": "^2.49.4",
     "body-parser": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -19,6 +20,7 @@
     "sequelize": "^6.37.6"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "nodemon": "^3.1.9",
+    "supabase": "^2.20.12"
   }
 }

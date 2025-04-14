@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulated database for ImagingStudy
 // const db = {
@@ -49,7 +49,7 @@ const db = require("../db");
 // create
 module.exports.create = async (args, context) => {
   let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
-  let doc = new ImagingStudy(args.resource).toJSON();
+  let doc = new ImagingStudy(context.req.body).toJSON();
 
   try {
     const result = await db.query(
@@ -108,7 +108,7 @@ module.exports.searchById = async (args, context) => {
 // update
 module.exports.update = async (args, context) => {
   let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
-  let updatedDoc = new ImagingStudy(args.resource).toJSON();
+  let updatedDoc = new ImagingStudy(context.req.body).toJSON();
 
   try {
     const result = await db.query(

@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulated database for Procedure
 // const db = {
@@ -182,7 +182,7 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   let Procedure = resolveSchema(args.base_version, "procedure");
-  let doc = new Procedure(args.resource).toJSON();
+  let doc = new Procedure(context.req.body).toJSON();
 
   try {
     const result = await db.query(
@@ -203,7 +203,7 @@ module.exports.create = async (args, context) => {
 module.exports.update = async (args, context) => {
   try {
     let Procedure = resolveSchema(args.base_version, "procedure");
-    let updatedProcedure = new Procedure(args.resource).toJSON();
+    let updatedProcedure = new Procedure(context.req.body).toJSON();
 
     const result = await db.query(
       "UPDATE Procedure SET data = $1 WHERE id = $2 RETURNING id",

@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulated database for ServiceRequest
 // const db = {
@@ -80,15 +80,15 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
 
-    const result = await db.query("SELECT id, data FROM ServiceRequest");
+    const { data, error } = await supabase.rpc("search_service_request");
 
-    let serviceRequests = result.rows.map((row) => {
-      let serviceRequestData = row.data;
-      serviceRequestData.id = row.id;
-      return new ServiceRequest(serviceRequestData);
-    });
+    if (error) {
+      throw error;
+    }
 
-    let entries = serviceRequests.map(
+    const serviceRequests = data.map((item) => new ServiceRequest(item));
+
+    const entries = serviceRequests.map(
       (serviceRequest) => new BundleEntry({ resource: serviceRequest })
     );
     return new Bundle({ entry: entries });
@@ -128,7 +128,7 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
-  let doc = new ServiceRequest(args.resource).toJSON();
+  let doc = new ServiceRequest(args.context.req.body).toJSON();
 
   try {
     const result = await db.query(
@@ -149,7 +149,7 @@ module.exports.create = async (args, context) => {
 module.exports.update = async (args, context) => {
   try {
     let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
-    let updatedServiceRequest = new ServiceRequest(args.resource).toJSON();
+    let updatedServiceRequest = new ServiceRequest(context.req.body).toJSON();
 
     const result = await db.query(
       "UPDATE ServiceRequest SET data = $1 WHERE id = $2 RETURNING id",

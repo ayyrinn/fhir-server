@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulasi database DiagnosticReport
 // const db = {
@@ -75,18 +75,44 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
 
-    const result = await db.query("SELECT id, data FROM DiagnosticReport");
+    const { data, error } = await supabase.from("diagnosticReport").select("*");
 
-    let diagnosticReports = result.rows.map((row) => {
-      let reportData = row.data;
-      reportData.id = row.id;
-      return new DiagnosticReport(reportData);
+    if (error) throw error;
+
+    const reports = data.map((row) => {
+      const basedOn = row.basedOn
+        ? [
+            {
+              reference: `ServiceRequest/${row.basedOn}`,
+            },
+          ]
+        : [];
+      const resultInterpreter = row.resultInterpreter
+        ? [
+            {
+              reference: `Practitioner/${row.resultInterpreter}`,
+            },
+          ]
+        : [];
+
+      const resource = {
+        resourceType: "DiagnosticReport",
+        id: row.id,
+        conclusion: row.findings,
+        recommendations: row.recommendations,
+        isAllDoctor: row.isAllDoctor,
+        identifier: row.identifier,
+        basedOn: basedOn,
+        status: row.status,
+        effectiveDateTime: row.effective_dateTime,
+        resultsInterpreter: resultInterpreter,
+      };
+      return new DiagnosticReport(resource);
     });
 
-    let entries = diagnosticReports.map(
+    let entries = reports.map(
       (report) => new BundleEntry({ resource: report })
     );
-
     return new Bundle({ entry: entries });
   } catch (error) {
     logger.error("Error searching for diagnostic reports:", error);
@@ -103,17 +129,37 @@ module.exports.searchById = async (args, context) => {
   let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
 
   try {
-    const result = await db.query(
-      "SELECT id, data FROM DiagnosticReport WHERE id = $1",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("diagnosticReport")
+      .select("*")
+      .eq("id", args.id)
+      .single();
 
-    if (result.rows.length === 0) {
+    if (error || !data) {
       throw new Error("Diagnostic report not found");
     }
 
-    let reportData = result.rows[0].data;
-    reportData.id = result.rows[0].id;
+    const basedOn = data.basedOn
+      ? [{ reference: `ServiceRequest/${data.basedOn}` }]
+      : [];
+
+    const resultInterpreter = data.resultInterpreter
+      ? [{ reference: `Practitioner/${data.resultInterpreter}` }]
+      : [];
+
+    const reportData = {
+      resourceType: "DiagnosticReport",
+      id: data.id,
+      conclusion: data.findings,
+      recommendations: data.recommendations,
+      isAllDoctor: data.isAllDoctor,
+      identifier: data.identifier ? data.identifier : [],
+      basedOn: basedOn,
+      status: data.status,
+      effectiveDateTime: data.effective_dateTime,
+      resultsInterpreter: resultInterpreter,
+    };
+
     return new DiagnosticReport(reportData);
   } catch (error) {
     logger.error("Error searching diagnostic report by ID:", error);
@@ -124,17 +170,39 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
-  let doc = new DiagnosticReport(args.resource).toJSON();
+  let doc = new DiagnosticReport(context.req.body).toJSON();
 
   try {
-    const result = await db.query(
-      "INSERT INTO DiagnosticReport (data) VALUES ($1) RETURNING id",
-      [JSON.stringify(doc)]
-    );
+    const {
+      identifier,
+      findings,
+      recommendations,
+      isAllDoctor,
+      basedOn,
+      status,
+      effectiveDateTime,
+      resultInterpreter,
+    } = doc;
 
-    return {
-      id: result.rows[0].id,
-    };
+    // Insert data into Supabase
+    const { data, error } = await supabase.from("diagnosticReport").insert([
+      {
+        identifier,
+        findings,
+        recommendations,
+        isAllDoctor,
+        basedOn,
+        status,
+        effectiveDateTime,
+        resultInterpreter,
+      },
+    ]);
+
+    if (error) throw error;
+
+    logger.info("✅ Diagnostic report created", data);
+
+    return { id: data?.[0]?.id };
   } catch (err) {
     logger.error("Error creating DiagnosticReport:", err);
     throw new Error(`Failed to create DiagnosticReport: ${err.message}`);
@@ -145,18 +213,42 @@ module.exports.create = async (args, context) => {
 module.exports.update = async (args, context) => {
   try {
     let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
-    let updatedReport = new DiagnosticReport(args.resource).toJSON();
+    let updatedReport = new DiagnosticReport(context.req.body).toJSON();
 
-    const result = await db.query(
-      "UPDATE DiagnosticReport SET data = $1 WHERE id = $2 RETURNING id",
-      [JSON.stringify(updatedReport), args.id]
-    );
+    const {
+      identifier,
+      findings,
+      recommendations,
+      isAllDoctor,
+      basedOn,
+      status,
+      effectiveDateTime,
+      resultInterpreter,
+    } = updatedReport;
 
-    if (result.rows.length === 0) {
+    // Update the diagnostic report in Supabase
+    const { data, error } = await supabase
+      .from("diagnosticReport")
+      .update({
+        identifier,
+        findings,
+        recommendations,
+        isAllDoctor,
+        basedOn,
+        status,
+        effectiveDateTime,
+        resultInterpreter,
+        updated_at: new Date(),
+      })
+      .eq("id", args.id)
+      .select("id")
+      .single();
+
+    if (error || !data)
       throw new Error("Diagnostic report not found or update failed");
-    }
 
-    return { id: args.id };
+    logger.info(`✅ Updated diagnostic report with ID: ${data.id}`);
+    return { id: data.id };
   } catch (err) {
     logger.error("Error updating diagnostic report:", err);
     throw new Error(`Failed to update diagnostic report: ${err.message}`);
@@ -166,14 +258,14 @@ module.exports.update = async (args, context) => {
 // remove
 module.exports.remove = async (args, context) => {
   try {
-    const result = await db.query(
-      "DELETE FROM DiagnosticReport WHERE id = $1 RETURNING id",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("diagnosticReport")
+      .delete()
+      .eq("id", args.id)
+      .select("id")
+      .single();
 
-    if (result.rows.length === 0) {
-      throw new Error("Diagnostic report not found or deletion failed");
-    }
+    if (error || !data) throw new Error("Delete failed or report not found");
 
     return {
       statusCode: 200,

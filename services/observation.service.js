@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulated database for Observation
 // const db = {
@@ -213,7 +213,7 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   let Observation = resolveSchema(args.base_version, "observation");
-  let doc = new Observation(args.resource).toJSON();
+  let doc = new Observation(context.req.body).toJSON();
 
   try {
     const result = await db.query(
@@ -234,7 +234,7 @@ module.exports.create = async (args, context) => {
 module.exports.update = async (args, context) => {
   try {
     let Observation = resolveSchema(args.base_version, "observation");
-    let updatedObservation = new Observation(args.resource).toJSON();
+    let updatedObservation = new Observation(context.req.body).toJSON();
 
     const result = await db.query(
       "UPDATE Observation SET data = $1 WHERE id = $2 RETURNING id",

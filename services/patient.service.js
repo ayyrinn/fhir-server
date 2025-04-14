@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulasi database pasien
 // const db = {
@@ -35,14 +35,20 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let Patient = resolveSchema(args.base_version, "patient");
 
-    // let results = db.patients;
-    // let patients = results.map((result) => new Patient(result));
+    const { data, error } = await supabase.from("patient").select("*");
 
-    const result = await db.query("SELECT id, data FROM Patient");
-    let patients = result.rows.map((row) => {
-      let patientData = row.data;
-      patientData.id = row.id;
-      return new Patient(patientData);
+    if (error) throw error;
+
+    const patients = data.map((row) => {
+      const resource = {
+        resourceType: "Patient",
+        identifier: row.identifier,
+        name: [{ family: row.familyName, given: row.given }],
+        gender: row.gender,
+        birthDate: row.birthDate,
+        id: row.id,
+      };
+      return new Patient(resource);
     });
 
     let entries = patients.map(
@@ -62,17 +68,24 @@ module.exports.searchById = async (args, context) => {
   }
   let Patient = resolveSchema(args.base_version, "patient");
   try {
-    const result = await db.query(
-      "SELECT id, data FROM Patient WHERE id = $1",
-      [args.id]
-    );
-    if (result.rows.length === 0) {
-      throw new Error("Patient not found");
-    }
+    const { data, error } = await supabase
+      .from("patient")
+      .select("*")
+      .eq("id", args.id)
+      .single();
 
-    let patientData = result.rows[0].data;
-    patientData.id = result.rows[0].id;
-    return new Patient(patientData);
+    if (error || !data) throw new Error("Patient not found");
+
+    const resource = {
+      resourceType: "Patient",
+      identifier: data.identifier,
+      name: [{ family: data.familyName, given: data.given }],
+      gender: data.gender,
+      birthDate: data.birthDate,
+      id: data.id,
+    };
+
+    return new Patient(resource);
   } catch (error) {
     logger.error("Error searching patient by ID:", error);
     throw new Error("Unable to find patient");
@@ -82,7 +95,7 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   try {
-    console.log("🟡 Full Args Object:", args);
+    console.log("🟡 Full Args Object:", body);
     console.log("🟢 Request Body:", context);
 
     if (!context.req.body || Object.keys(context.req.body).length === 0) {
@@ -93,20 +106,32 @@ module.exports.create = async (args, context) => {
 
     let Patient = resolveSchema(args.base_version, "patient");
 
-    console.log("Resolved Patient Schema:", Patient);
-
-    console.log("Raw Patient Data Before Creating Instance:", args); // Directly using args
-
-    let patientData = (patientData = new Patient(args.resource).toJSON());
+    let patientData = (patientData = new Patient(context.req.body).toJSON());
 
     console.log("Converted Patient Data:", patientData);
 
-    const query = `INSERT INTO Patient (data) VALUES ($1) RETURNING id`;
-    const values = [JSON.stringify(patientData)];
+    const identifier = resource.identifier || [];
+    const name = resource.name?.[0] || {};
+    const familyName = name.family || null;
+    const given = name.given || [];
+    const gender = resource.gender || null;
+    const birthDate = resource.birthDate || null;
 
-    const result = await db.query(query, values);
+    const { data, error } = await supabase.from("patient").insert([
+      {
+        identifier,
+        familyName,
+        given,
+        gender,
+        birthDate,
+      },
+    ]);
 
-    return { id: result.rows[0].id };
+    if (error) throw error;
+
+    logger.info("✅ Patient created", data);
+
+    return { id: data?.[0]?.id };
   } catch (err) {
     console.error("Error inserting patient:", err);
     throw new Error(`Failed to insert patient: ${err.message}`);
@@ -117,18 +142,32 @@ module.exports.create = async (args, context) => {
 module.exports.update = async (args, context) => {
   try {
     let Patient = resolveSchema(args.base_version, "patient");
-    let updatedPatient = new Patient(args.resource).toJSON();
+    let updatedPatient = new Patient(context.req.body).toJSON();
 
-    const result = await db.query(
-      "UPDATE Patient SET data = $1 WHERE id = $2 RETURNING id",
-      [updatedPatient, args.id]
-    );
+    const identifier = updatedPatient.identifier || [];
+    const name = updatedPatient.name?.[0] || {};
+    const familyName = name.family || null;
+    const given = name.given || [];
+    const gender = updatedPatient.gender || null;
+    const birthDate = updatedPatient.birthDate || null;
 
-    if (result.rows.length === 0) {
-      throw new Error("Patient not found or update failed");
-    }
+    const { data, error } = await supabase
+      .from("patient")
+      .update({
+        identifier,
+        familyName,
+        given,
+        gender,
+        birthDate,
+        updated_at: new Date(),
+      })
+      .eq("id", args.id)
+      .select("id")
+      .single();
 
-    return { id: args.id };
+    if (error || !data) throw new Error("Patient not found or update failed");
+    logger.info(`✅ Updated patient with ID: ${data.id}`);
+    return { id: data.id };
   } catch (err) {
     logger.error("Error updating patient:", err);
     throw new Error(`Failed to update patient: ${err.message}`);
@@ -138,14 +177,14 @@ module.exports.update = async (args, context) => {
 // remove
 module.exports.remove = async (args, context) => {
   try {
-    const result = await db.query(
-      "DELETE FROM Patient WHERE id = $1 RETURNING id",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("patient")
+      .delete()
+      .eq("id", args.id)
+      .select("id")
+      .single();
 
-    if (result.rows.length === 0) {
-      throw new Error("Patient not found or deletion failed");
-    }
+    if (error || !data) throw new Error("Patient not found or deletion failed");
 
     return {
       statusCode: 200,

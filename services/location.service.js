@@ -1,6 +1,6 @@
 const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
-const db = require("../db");
+const supabase = require("../db");
 
 // Simulated database for Location
 // const db = {
@@ -122,7 +122,7 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   let Location = resolveSchema(args.base_version, "location");
-  let doc = new Location(args.resource).toJSON();
+  let doc = new Location(context.req.body).toJSON();
 
   try {
     const result = await db.query(
@@ -143,7 +143,7 @@ module.exports.create = async (args, context) => {
 module.exports.update = async (args, context) => {
   try {
     let Location = resolveSchema(args.base_version, "location");
-    let updatedLocation = new Location(args.resource).toJSON();
+    let updatedLocation = new Location(context.req.body).toJSON();
 
     const result = await db.query(
       "UPDATE Location SET data = $1 WHERE id = $2 RETURNING id",

@@ -4,28 +4,6 @@ services:
     build: .
     ports:
       - "3000:3000"
-    depends_on:
-      - fhir-postgres
-    environment:
-      POSTGRES_USER: fhir_user
-      POSTGRES_PASSWORD: fhir_pass
-      POSTGRES_DB: fhir_db
     volumes:
       - .:/usr/src/app
-    command: ["npm", "start"]
-
-  fhir-postgres:
-    image: postgres
-    container_name: fhir-postgres
-    restart: always
-    environment:
-      POSTGRES_PASSWORD: fhir_pass
-      POSTGRES_USER: fhir_user
-      POSTGRES_DB: fhir_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-volumes:
-  postgres_data:
+    command: ["npm", "dev"]
