@@ -165,21 +165,21 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let Observation = resolveSchema(args.base_version, "observation");
 
-    const result = await db.query("SELECT id, data FROM Observation");
+    const { data, error } = await supabase.rpc("search_observation");
 
-    let observations = result.rows.map((row) => {
-      let observationData = row.data;
-      observationData.id = row.id;
-      return new Observation(observationData);
-    });
+    if (error) {
+      throw error;
+    }
 
-    let entries = observations.map(
+    const observation = data.map((item) => new Observation(item));
+
+    const entries = observation.map(
       (observation) => new BundleEntry({ resource: observation })
     );
     return new Bundle({ entry: entries });
   } catch (error) {
-    logger.error("Error searching for observations:", error);
-    throw new Error("Unable to locate observations");
+    logger.error("Error searching for observation:", error);
+    throw new Error("Unable to locate observation");
   }
 };
 
@@ -189,20 +189,22 @@ module.exports.searchById = async (args, context) => {
     throw new Error("Observation ID is required");
   }
 
-  let Observation = resolveSchema(args.base_version, "observation");
+  let Observation = resolveSchema(args.base_version, "search_observation_by_id");
 
   try {
-    const result = await db.query(
-      "SELECT id, data FROM Observation WHERE id = $1",
-      [args.id]
-    );
+    const { data, error } = await supabase.rpc("search_observation", {
+      observation_id: args.id,
+    });
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("Observation not found");
     }
 
-    let observationData = result.rows[0].data;
-    observationData.id = result.rows[0].id;
+    let observationData = data[0];
     return new Observation(observationData);
   } catch (error) {
     logger.error("Error searching observation by ID:", error);
