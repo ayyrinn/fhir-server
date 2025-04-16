@@ -2,77 +2,6 @@ const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
 const supabase = require("../db");
 
-// Simulated database for ServiceRequest
-// const db = {
-//   serviceRequests: [
-//     {
-//       _id: "45e8a7f8-8a6d-4a3a-b531-bb9ec7b0c2e1",
-//       resourceType: "ServiceRequest",
-//       extension: [
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/modality",
-//           valueCodeableConcept: {
-//             coding: [
-//               {
-//                 system: "http://dicom.nema.org/resources/ontology/DCM",
-//                 code: "DX",
-//               },
-//             ],
-//           },
-//         },
-//       ],
-//       identifier: [
-//         {
-//           system: "http://hospital.smarthealth.org/accession",
-//           value: "ACC110225",
-//         },
-//       ],
-//       status: "active",
-//       priority: "routine",
-//       code: {
-//         coding: [
-//           {
-//             system: "http://loinc.org",
-//             code: "24531-6",
-//             display: "Study",
-//           },
-//         ],
-//       },
-//       subject: {
-//         reference: "Patient/19",
-//         display: "Patient Name",
-//       },
-//       occurrenceDateTime: "2025-02-14T03:23:00Z",
-//       requester: {
-//         reference: "Practitioner/260ef5de-d06d-4e38-899b-701a4f217ed0",
-//         display: "Referring Doctor",
-//       },
-//       performer: [
-//         {
-//           reference: "Practitioner/260ef5de-d06d-4e38-899b-701a4f217ed0",
-//           display: "PIC Doctor",
-//         },
-//       ],
-//       reasonCode: [
-//         {
-//           coding: [
-//             {
-//               system: "http://snomed.info/sct",
-//               code: "386661006",
-//               display: "Clinical",
-//             },
-//           ],
-//         },
-//       ],
-//       insurance: [
-//         {
-//           display: "BPJS",
-//         },
-//       ],
-//     },
-//   ],
-// };
-
 // search
 module.exports.search = async (args, context) => {
   try {
@@ -107,17 +36,19 @@ module.exports.searchById = async (args, context) => {
   let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
 
   try {
-    const result = await db.query(
-      "SELECT id, data FROM ServiceRequest WHERE id = $1",
-      [args.id]
-    );
+    const { data, error } = await supabase.rpc("search_service_request_by_id", {
+      request_id: args.id,
+    });
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("ServiceRequest not found");
     }
 
-    let serviceRequestData = result.rows[0].data;
-    serviceRequestData.id = result.rows[0].id;
+    let serviceRequestData = data[0];
     return new ServiceRequest(serviceRequestData);
   } catch (error) {
     logger.error("Error searching service request by ID:", error);
@@ -128,16 +59,19 @@ module.exports.searchById = async (args, context) => {
 // create
 module.exports.create = async (args, context) => {
   let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
-  let doc = new ServiceRequest(args.context.req.body).toJSON();
+  let doc = new ServiceRequest(context.req.body).toJSON();
 
   try {
-    const result = await db.query(
-      "INSERT INTO ServiceRequest (data) VALUES ($1) RETURNING id",
-      [JSON.stringify(doc)]
-    );
+    const { data, error } = await supabase.rpc("create_service_request", {
+      payload: doc,
+    });
+
+    if (error) {
+      throw error;
+    }
 
     return {
-      id: result.rows[0].id,
+      id: data,
     };
   } catch (err) {
     logger.error("Error creating ServiceRequest:", err);
@@ -147,20 +81,23 @@ module.exports.create = async (args, context) => {
 
 // update
 module.exports.update = async (args, context) => {
+  let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
+  let updatedServiceRequest = new ServiceRequest(context.req.body).toJSON();
   try {
-    let ServiceRequest = resolveSchema(args.base_version, "servicerequest");
-    let updatedServiceRequest = new ServiceRequest(context.req.body).toJSON();
+    const { data, error } = await supabase.rpc("update_service_request", {
+      payload: updatedServiceRequest,
+      service_request_id: args.id,
+    });
 
-    const result = await db.query(
-      "UPDATE ServiceRequest SET data = $1 WHERE id = $2 RETURNING id",
-      [JSON.stringify(updatedServiceRequest), args.id]
-    );
+    if (error) {
+      throw error;
+    }
 
-    if (result.rows.length === 0) {
+    if (!data || data !== args.id) {
       throw new Error("ServiceRequest not found or update failed");
     }
 
-    return { id: args.id };
+    return { id: data };
   } catch (err) {
     logger.error("Error updating service request:", err);
     throw new Error(`Failed to update service request: ${err.message}`);
@@ -170,12 +107,17 @@ module.exports.update = async (args, context) => {
 // remove
 module.exports.remove = async (args, context) => {
   try {
-    const result = await db.query(
-      "DELETE FROM ServiceRequest WHERE id = $1 RETURNING id",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("serviceRequest")
+      .delete()
+      .eq("id", args.id)
+      .select("id");
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("ServiceRequest not found or deletion failed");
     }
 

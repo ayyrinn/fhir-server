@@ -2,74 +2,6 @@ const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
 const supabase = require("../db");
 
-// Simulated database for Practitioner
-// const db = {
-//   practitioners: [
-//     {
-//       _id: "14873fcd-b52c-471c-8b65-56ab2e532b84",
-//       resourceType: "Practitioner",
-//       extension: [
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/practitioner-role",
-//           valueCoding: {
-//             system: "http://example.org/fhir/practitioner-roles",
-//             display: "superadmin",
-//           },
-//         },
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/optional-1",
-//           valueString: "Optional 1",
-//         },
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/optional-2",
-//           valueString: "Optional 2",
-//         },
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/optional-3",
-//           valueString: "Optional 3",
-//         },
-//       ],
-//       active: true,
-//       name: [
-//         {
-//           use: "official",
-//           family: "superadmin",
-//           given: ["superadmin"],
-//         },
-//       ],
-//     },
-//     {
-//       _id: "12345abc-de67-890f-gh12-ijklmn34opqr",
-//       resourceType: "Practitioner",
-//       extension: [
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/practitioner-role",
-//           valueCoding: {
-//             system: "http://example.org/fhir/practitioner-roles",
-//             display: "admin",
-//           },
-//         },
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/optional-1",
-//           valueString: "Optional 4",
-//         },
-//         {
-//           url: "http://example.org/fhir/StructureDefinition/optional-2",
-//           valueString: "Optional 5",
-//         },
-//       ],
-//       active: true,
-//       name: [
-//         {
-//           use: "official",
-//           family: "admin",
-//           given: ["admin"],
-//         },
-//       ],
-//     },
-//   ],
-// };
-
 // search
 module.exports.search = async (args, context) => {
   try {
@@ -77,15 +9,15 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let Practitioner = resolveSchema(args.base_version, "practitioner");
 
-    const result = await db.query("SELECT id, data FROM Practitioner");
+    const { data, error } = await supabase.rpc("search_practitioner");
 
-    let practitioners = result.rows.map((row) => {
-      let practitionerData = row.data;
-      practitionerData.id = row.id;
-      return new Practitioner(practitionerData);
-    });
+    if (error) {
+      throw error;
+    }
 
-    let entries = practitioners.map(
+    const practitioners = data.map((item) => new Practitioner(item));
+
+    const entries = practitioners.map(
       (practitioner) => new BundleEntry({ resource: practitioner })
     );
 
@@ -105,17 +37,19 @@ module.exports.searchById = async (args, context) => {
   let Practitioner = resolveSchema(args.base_version, "practitioner");
 
   try {
-    const result = await db.query(
-      "SELECT id, data FROM Practitioner WHERE id = $1",
-      [args.id]
-    );
+    const { data, error } = await supabase.rpc("search_practitioner_by_id", {
+      practitioner_id: args.id,
+    });
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("Practitioner not found");
     }
 
-    let practitionerData = result.rows[0].data;
-    practitionerData.id = result.rows[0].id;
+    let practitionerData = data;
     return new Practitioner(practitionerData);
   } catch (error) {
     logger.error("Error searching practitioner by ID:", error);
@@ -129,13 +63,16 @@ module.exports.create = async (args, context) => {
   let doc = new Practitioner(context.req.body).toJSON();
 
   try {
-    const result = await db.query(
-      "INSERT INTO Practitioner (data) VALUES ($1) RETURNING id",
-      [JSON.stringify(doc)]
-    );
+    const { data, error } = await supabase.rpc("create_practitioner", {
+      payload: doc,
+    });
+
+    if (error) {
+      throw error;
+    }
 
     return {
-      id: result.rows[0].id,
+      id: data,
     };
   } catch (err) {
     console.error("Error creating Practitioner:", err);
@@ -145,20 +82,23 @@ module.exports.create = async (args, context) => {
 
 // update
 module.exports.update = async (args, context) => {
+  let Practitioner = resolveSchema(args.base_version, "practitioner");
+  let updatedPractitioner = new Practitioner(context.req.body).toJSON();
   try {
-    let Practitioner = resolveSchema(args.base_version, "practitioner");
-    let updatedPractitioner = new Practitioner(context.req.body).toJSON();
+    const { data, error } = await supabase.rpc("update_practitioner", {
+      payload: updatedPractitioner,
+      practitioner_id: args.id,
+    });
 
-    const result = await db.query(
-      "UPDATE Practitioner SET data = $1 WHERE id = $2 RETURNING id",
-      [JSON.stringify(updatedPractitioner), args.id]
-    );
+    if (error) {
+      throw error;
+    }
 
-    if (result.rows.length === 0) {
+    if (!data || data !== args.id) {
       throw new Error("Practitioner not found or update failed");
     }
 
-    return { id: args.id };
+    return { id: data };
   } catch (err) {
     logger.error("Error updating practitioner:", err);
     throw new Error(`Failed to update practitioner: ${err.message}`);
@@ -168,12 +108,17 @@ module.exports.update = async (args, context) => {
 // remove
 module.exports.remove = async (args, context) => {
   try {
-    const result = await db.query(
-      "DELETE FROM Practitioner WHERE id = $1 RETURNING id",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("practitioner")
+      .delete()
+      .eq("id", args.id)
+      .select("id");
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("Practitioner not found or deletion failed");
     }
 

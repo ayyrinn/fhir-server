@@ -2,72 +2,6 @@ const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
 const supabase = require("../db");
 
-// Simulasi database DiagnosticReport
-// const db = {
-//   diagnosticReports: [
-//     {
-//       _id: "DR001",
-//       resourceType: "DiagnosticReport",
-//       identifier: [
-//         {
-//           system: "http://example.org/fhir/StructureDefinition/supporting-info",
-//           value: "ACC110225-4",
-//         },
-//       ],
-//       status: "final",
-//       effectiveDateTime: "2025-02-13T07:24:02.529Z",
-//       conclusion: "Test conclusion 1",
-//       extension: [
-//         {
-//           url: "http://hospital.smarthealth.org/diagnosticreport/findings",
-//           valueString: "Findings 1",
-//         },
-//         {
-//           url: "http://hospital.smarthealth.org/diagnosticreport/recommendation",
-//           valueString: "Recommendation 1",
-//         },
-//         {
-//           url: "http://hospital.smarthealth.org/diagnosticreport/isAllDoctor",
-//           valueBoolean: true,
-//         },
-//       ],
-//       resultsInterpreter: [
-//         { reference: "Practitioner/123", display: "Dr. John Doe" },
-//       ],
-//     },
-//     {
-//       _id: "DR002",
-//       resourceType: "DiagnosticReport",
-//       identifier: [
-//         {
-//           system: "http://example.org/fhir/StructureDefinition/supporting-info",
-//           value: "ACC110225-5",
-//         },
-//       ],
-//       status: "preliminary",
-//       effectiveDateTime: "2025-03-01T10:24:02.529Z",
-//       conclusion: "Test conclusion 2",
-//       extension: [
-//         {
-//           url: "http://hospital.smarthealth.org/diagnosticreport/findings",
-//           valueString: "Findings 2",
-//         },
-//         {
-//           url: "http://hospital.smarthealth.org/diagnosticreport/recommendation",
-//           valueString: "Recommendation 2",
-//         },
-//         {
-//           url: "http://hospital.smarthealth.org/diagnosticreport/isAllDoctor",
-//           valueBoolean: false,
-//         },
-//       ],
-//       resultsInterpreter: [
-//         { reference: "Practitioner/124", display: "Dr. Jane Smith" },
-//       ],
-//     },
-//   ],
-// };
-
 // search
 module.exports.search = async (args, context) => {
   try {
@@ -75,43 +9,16 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
 
-    const { data, error } = await supabase.from("diagnosticReport").select("*");
+    const { data, error } = await supabase.rpc("search_diagnostic_reports");
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
 
-    const reports = data.map((row) => {
-      const basedOn = row.basedOn
-        ? [
-            {
-              reference: `ServiceRequest/${row.basedOn}`,
-            },
-          ]
-        : [];
-      const resultInterpreter = row.resultInterpreter
-        ? [
-            {
-              reference: `Practitioner/${row.resultInterpreter}`,
-            },
-          ]
-        : [];
+    const diagnosticReports = data.map((item) => new DiagnosticReport(item));
 
-      const resource = {
-        resourceType: "DiagnosticReport",
-        id: row.id,
-        conclusion: row.findings,
-        recommendations: row.recommendations,
-        isAllDoctor: row.isAllDoctor,
-        identifier: row.identifier,
-        basedOn: basedOn,
-        status: row.status,
-        effectiveDateTime: row.effective_dateTime,
-        resultsInterpreter: resultInterpreter,
-      };
-      return new DiagnosticReport(resource);
-    });
-
-    let entries = reports.map(
-      (report) => new BundleEntry({ resource: report })
+    const entries = diagnosticReports.map(
+      (diagnosticReport) => new BundleEntry({ resource: diagnosticReport })
     );
     return new Bundle({ entry: entries });
   } catch (error) {
@@ -129,40 +36,32 @@ module.exports.searchById = async (args, context) => {
   let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
 
   try {
-    const { data, error } = await supabase
-      .from("diagnosticReport")
-      .select("*")
-      .eq("id", args.id)
-      .single();
+    const { data, error } = await supabase.rpc(
+      "search_diagnostic_report_by_id",
+      {
+        report_id: args.id,
+      }
+    );
 
-    if (error || !data) {
-      throw new Error("Diagnostic report not found");
+    if (error) {
+      throw error;
     }
 
-    const basedOn = data.basedOn
-      ? [{ reference: `ServiceRequest/${data.basedOn}` }]
-      : [];
+    if (!data || data.length === 0) {
+      throw new Error("DiagnosticReport not found");
+    }
 
-    const resultInterpreter = data.resultInterpreter
-      ? [{ reference: `Practitioner/${data.resultInterpreter}` }]
-      : [];
-
-    const reportData = {
-      resourceType: "DiagnosticReport",
-      id: data.id,
-      conclusion: data.findings,
-      recommendations: data.recommendations,
-      isAllDoctor: data.isAllDoctor,
-      identifier: data.identifier ? data.identifier : [],
-      basedOn: basedOn,
-      status: data.status,
-      effectiveDateTime: data.effective_dateTime,
-      resultsInterpreter: resultInterpreter,
-    };
+    let reportData = data;
 
     return new DiagnosticReport(reportData);
   } catch (error) {
-    logger.error("Error searching diagnostic report by ID:", error);
+    logger.error("Error searching DiagnosticReport by ID", {
+      report_id: args.id,
+      error: {
+        message: error.message,
+        stack: error.stack,
+      },
+    });
     throw new Error("Unable to find diagnostic report");
   }
 };
@@ -173,36 +72,17 @@ module.exports.create = async (args, context) => {
   let doc = new DiagnosticReport(context.req.body).toJSON();
 
   try {
-    const {
-      identifier,
-      findings,
-      recommendations,
-      isAllDoctor,
-      basedOn,
-      status,
-      effectiveDateTime,
-      resultInterpreter,
-    } = doc;
+    const { data, error } = await supabase.rpc("create_diagnostic_report", {
+      payload: doc,
+    });
 
-    // Insert data into Supabase
-    const { data, error } = await supabase.from("diagnosticReport").insert([
-      {
-        identifier,
-        findings,
-        recommendations,
-        isAllDoctor,
-        basedOn,
-        status,
-        effectiveDateTime,
-        resultInterpreter,
-      },
-    ]);
+    if (error) {
+      throw error;
+    }
 
-    if (error) throw error;
-
-    logger.info("✅ Diagnostic report created", data);
-
-    return { id: data?.[0]?.id };
+    return {
+      id: data,
+    };
   } catch (err) {
     logger.error("Error creating DiagnosticReport:", err);
     throw new Error(`Failed to create DiagnosticReport: ${err.message}`);
@@ -211,44 +91,23 @@ module.exports.create = async (args, context) => {
 
 // update
 module.exports.update = async (args, context) => {
+  let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
+  let updatedReport = new DiagnosticReport(context.req.body).toJSON();
   try {
-    let DiagnosticReport = resolveSchema(args.base_version, "diagnosticreport");
-    let updatedReport = new DiagnosticReport(context.req.body).toJSON();
+    const { data, error } = await supabase.rpc("update_diagnostic_report", {
+      report_id: args.id,
+      payload: updatedReport,
+    });
 
-    const {
-      identifier,
-      findings,
-      recommendations,
-      isAllDoctor,
-      basedOn,
-      status,
-      effectiveDateTime,
-      resultInterpreter,
-    } = updatedReport;
+    if (error) {
+      throw error;
+    }
 
-    // Update the diagnostic report in Supabase
-    const { data, error } = await supabase
-      .from("diagnosticReport")
-      .update({
-        identifier,
-        findings,
-        recommendations,
-        isAllDoctor,
-        basedOn,
-        status,
-        effectiveDateTime,
-        resultInterpreter,
-        updated_at: new Date(),
-      })
-      .eq("id", args.id)
-      .select("id")
-      .single();
+    if (!data || data !== args.id) {
+      throw new Error("DiagnosticReport not found or update failed");
+    }
 
-    if (error || !data)
-      throw new Error("Diagnostic report not found or update failed");
-
-    logger.info(`✅ Updated diagnostic report with ID: ${data.id}`);
-    return { id: data.id };
+    return { id: data };
   } catch (err) {
     logger.error("Error updating diagnostic report:", err);
     throw new Error(`Failed to update diagnostic report: ${err.message}`);

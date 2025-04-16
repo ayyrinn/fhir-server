@@ -2,70 +2,6 @@ const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
 const supabase = require("../db");
 
-// Simulated database for ImagingStudy
-// const db = {
-//   imagingStudies: [
-//     {
-//       _id: "I001",
-//       resourceType: "ImagingStudy",
-//       identifier: [
-//         {
-//           system: "http://hospital.smarthealth.org/study-id",
-//           value:
-//             "1.3.6.1.4.1.14519.5.2.1.1188.4001.866856253970500879015300047605",
-//         },
-//         {
-//           system: "http://hospital.smarthealth.org/accession",
-//           value: "ACC001",
-//         },
-//       ],
-//       status: "available",
-//       modality: [{ code: "MR", display: "Magnetic Resonance Imaging" }],
-//       subject: { reference: "Patient/P001" },
-//       started: "2025-02-06T03:22:36.595Z",
-//     },
-//     {
-//       _id: "I002",
-//       resourceType: "ImagingStudy",
-//       identifier: [
-//         {
-//           system: "http://hospital.smarthealth.org/study-id",
-//           value:
-//             "1.3.6.1.4.1.14519.5.2.1.1188.4001.866856253970500879015300047606",
-//         },
-//         {
-//           system: "http://hospital.smarthealth.org/accession",
-//           value: "ACC002",
-//         },
-//       ],
-//       status: "available",
-//       modality: [{ code: "CT", display: "Computed Tomography" }],
-//       subject: { reference: "Patient/P002" },
-//       started: "2025-02-07T05:15:25.123Z",
-//     },
-//   ],
-// };
-
-// create
-module.exports.create = async (args, context) => {
-  let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
-  let doc = new ImagingStudy(context.req.body).toJSON();
-
-  try {
-    const result = await db.query(
-      "INSERT INTO ImagingStudy (data) VALUES ($1) RETURNING id",
-      [JSON.stringify(doc)]
-    );
-
-    return {
-      id: result.rows[0].id,
-    };
-  } catch (err) {
-    logger.error("Error creating ImagingStudy:", err);
-    throw new Error(`Failed to create ImagingStudy: ${err.message}`);
-  }
-};
-
 // search
 module.exports.search = async (args, context) => {
   try {
@@ -73,10 +9,16 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
 
-    const result = await db.query("SELECT data FROM ImagingStudy");
+    const { data, error } = await supabase.rpc("search_imaging_study");
 
-    let studies = result.rows.map((row) => new ImagingStudy(row.data));
-    let entries = studies.map((study) => new BundleEntry({ resource: study }));
+    if (error) {
+      throw error;
+    }
+
+    const studies = data.map((item) => new ImagingStudy(item));
+    const entries = studies.map(
+      (study) => new BundleEntry({ resource: study })
+    );
 
     return new Bundle({ entry: entries });
   } catch (error) {
@@ -87,43 +29,75 @@ module.exports.search = async (args, context) => {
 
 // searchById
 module.exports.searchById = async (args, context) => {
+  if (!args || !args.id) {
+    throw new Error("ImagingStudy ID is required");
+  }
+
   let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
 
   try {
-    const result = await db.query(
-      "SELECT data FROM ImagingStudy WHERE id = $1",
-      [args.id]
-    );
+    const { data, error } = await supabase.rpc("search_imaging_study_by_id", {
+      study_id: args.id,
+    });
 
-    if (result.rows.length === 0) {
-      throw new Error("Imaging study not found");
+    if (error) {
+      throw error;
     }
 
-    return new ImagingStudy(result.rows[0].data);
+    if (!data || data.length === 0) {
+      throw new Error("ImagingStudy not found");
+    }
+
+    let imagingStudyData = data;
+    return new ImagingStudy(imagingStudyData);
   } catch (err) {
     throw new Error(`Failed to retrieve ImagingStudy: ${err.message}`);
+  }
+};
+
+// create
+module.exports.create = async (args, context) => {
+  let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
+  let doc = new ImagingStudy(context.req.body).toJSON();
+
+  try {
+    const { data, error } = await supabase.rpc("create_imaging_study", {
+      payload: doc,
+    });
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      id: data,
+    };
+  } catch (err) {
+    logger.error("Error creating ImagingStudy:", err);
+    throw new Error(`Failed to create ImagingStudy: ${err.message}`);
   }
 };
 
 // update
 module.exports.update = async (args, context) => {
   let ImagingStudy = resolveSchema(args.base_version, "imagingstudy");
-  let updatedDoc = new ImagingStudy(context.req.body).toJSON();
+  let updatedStudy = new ImagingStudy(context.req.body).toJSON();
 
   try {
-    const result = await db.query(
-      "UPDATE ImagingStudy SET data = $1 WHERE id = $2 RETURNING id",
-      [JSON.stringify(updatedDoc), args.id]
-    );
+    const { data, error } = await supabase.rpc("update_imaging_study", {
+      payload: updatedStudy,
+      imaging_study_id: args.id,
+    });
 
-    if (result.rowCount === 0) {
-      throw new Error("ImagingStudy not found");
+    if (error) {
+      throw error;
     }
 
-    return {
-      id: args.id,
-      resource_version: "2", // Increment the version for updates
-    };
+    if (!data || data !== args.id) {
+      throw new Error("ImagingStudy not found or update failed");
+    }
+
+    return { id: data };
   } catch (err) {
     throw new Error(`Failed to update ImagingStudy: ${err.message}`);
   }
@@ -132,16 +106,24 @@ module.exports.update = async (args, context) => {
 // remove
 module.exports.remove = async (args, context) => {
   try {
-    const result = await db.query(
-      "DELETE FROM ImagingStudy WHERE id = $1 RETURNING id",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("imagingStudy")
+      .delete()
+      .eq("id", args.id)
+      .select("id");
 
-    if (result.rowCount === 0) {
-      throw new Error("ImagingStudy not found");
+    if (error) {
+      throw new Error(error.message);
     }
 
-    return { message: "ImagingStudy deleted successfully" };
+    if (!data || data.length === 0) {
+      throw new Error("ImagingStudy not found or deletion failed");
+    }
+
+    return {
+      statusCode: 200,
+      message: "ImagingStudy deleted successfully",
+    };
   } catch (err) {
     throw new Error(`Failed to delete ImagingStudy: ${err.message}`);
   }

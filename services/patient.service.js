@@ -2,32 +2,6 @@ const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
 const supabase = require("../db");
 
-// Simulasi database pasien
-// const db = {
-//   patients: [
-//     {
-//       _id: "P001",
-//       resourceType: "Patient",
-//       identifier: [
-//         { system: "http://hospital.smarthealth.org/mrn", value: "MRN001" },
-//       ],
-//       name: [{ use: "official", given: ["John"], family: "Doe" }],
-//       gender: "male",
-//       birthDate: "1990-01-01",
-//     },
-//     {
-//       _id: "P002",
-//       resourceType: "Patient",
-//       identifier: [
-//         { system: "http://hospital.smarthealth.org/mrn", value: "MRN002" },
-//       ],
-//       name: [{ use: "official", given: ["Jane"], family: "Smith" }],
-//       gender: "female",
-//       birthDate: "1990-05-15",
-//     },
-//   ],
-// };
-
 // search
 module.exports.search = async (args, context) => {
   try {
@@ -35,23 +9,13 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let Patient = resolveSchema(args.base_version, "patient");
 
-    const { data, error } = await supabase.from("patient").select("*");
+    const { data, error } = await supabase.rpc("search_patient");
 
     if (error) throw error;
 
-    const patients = data.map((row) => {
-      const resource = {
-        resourceType: "Patient",
-        identifier: row.identifier,
-        name: [{ family: row.familyName, given: row.given }],
-        gender: row.gender,
-        birthDate: row.birthDate,
-        id: row.id,
-      };
-      return new Patient(resource);
-    });
+    const patients = data.map((item) => new Patient(item));
 
-    let entries = patients.map(
+    const entries = patients.map(
       (patient) => new BundleEntry({ resource: patient })
     );
     return new Bundle({ entry: entries });
@@ -68,24 +32,21 @@ module.exports.searchById = async (args, context) => {
   }
   let Patient = resolveSchema(args.base_version, "patient");
   try {
-    const { data, error } = await supabase
-      .from("patient")
-      .select("*")
-      .eq("id", args.id)
-      .single();
+    const { data, error } = await supabase.rpc("search_patient_by_id", {
+      patient_id: args.id,
+    });
 
-    if (error || !data) throw new Error("Patient not found");
+    if (error) {
+      throw error;
+    }
 
-    const resource = {
-      resourceType: "Patient",
-      identifier: data.identifier,
-      name: [{ family: data.familyName, given: data.given }],
-      gender: data.gender,
-      birthDate: data.birthDate,
-      id: data.id,
-    };
+    if (!data || data.length === 0) {
+      throw new Error("ServiceRequest not found");
+    }
 
-    return new Patient(resource);
+    let patientData = data;
+
+    return new Patient(patientData);
   } catch (error) {
     logger.error("Error searching patient by ID:", error);
     throw new Error("Unable to find patient");
@@ -94,44 +55,21 @@ module.exports.searchById = async (args, context) => {
 
 // create
 module.exports.create = async (args, context) => {
-  try {
-    console.log("🟡 Full Args Object:", body);
-    console.log("🟢 Request Body:", context);
+  let Patient = resolveSchema(args.base_version, "patient");
+  let patientData = new Patient(context.req.body).toJSON();
 
-    if (!context.req.body || Object.keys(context.req.body).length === 0) {
-      throw new Error("❌ Missing patient resource data.");
+  try {
+    const { data, error } = await supabase.rpc("create_patient", {
+      payload: patientData,
+    });
+
+    if (error) {
+      throw error;
     }
 
-    console.log("✅ Data received", context.req.body);
-
-    let Patient = resolveSchema(args.base_version, "patient");
-
-    let patientData = (patientData = new Patient(context.req.body).toJSON());
-
-    console.log("Converted Patient Data:", patientData);
-
-    const identifier = resource.identifier || [];
-    const name = resource.name?.[0] || {};
-    const familyName = name.family || null;
-    const given = name.given || [];
-    const gender = resource.gender || null;
-    const birthDate = resource.birthDate || null;
-
-    const { data, error } = await supabase.from("patient").insert([
-      {
-        identifier,
-        familyName,
-        given,
-        gender,
-        birthDate,
-      },
-    ]);
-
-    if (error) throw error;
-
-    logger.info("✅ Patient created", data);
-
-    return { id: data?.[0]?.id };
+    return {
+      id: data,
+    };
   } catch (err) {
     console.error("Error inserting patient:", err);
     throw new Error(`Failed to insert patient: ${err.message}`);
@@ -140,34 +78,23 @@ module.exports.create = async (args, context) => {
 
 // update
 module.exports.update = async (args, context) => {
+  let Patient = resolveSchema(args.base_version, "patient");
+  let updatedPatient = new Patient(context.req.body).toJSON();
   try {
-    let Patient = resolveSchema(args.base_version, "patient");
-    let updatedPatient = new Patient(context.req.body).toJSON();
+    const { data, error } = await supabase.rpc("update_patient", {
+      payload: updatedPatient,
+      patient_id: args.id,
+    });
 
-    const identifier = updatedPatient.identifier || [];
-    const name = updatedPatient.name?.[0] || {};
-    const familyName = name.family || null;
-    const given = name.given || [];
-    const gender = updatedPatient.gender || null;
-    const birthDate = updatedPatient.birthDate || null;
+    if (error) {
+      throw error;
+    }
 
-    const { data, error } = await supabase
-      .from("patient")
-      .update({
-        identifier,
-        familyName,
-        given,
-        gender,
-        birthDate,
-        updated_at: new Date(),
-      })
-      .eq("id", args.id)
-      .select("id")
-      .single();
+    if (!data || data !== args.id) {
+      throw new Error("Patient not found or update failed");
+    }
 
-    if (error || !data) throw new Error("Patient not found or update failed");
-    logger.info(`✅ Updated patient with ID: ${data.id}`);
-    return { id: data.id };
+    return { id: data };
   } catch (err) {
     logger.error("Error updating patient:", err);
     throw new Error(`Failed to update patient: ${err.message}`);
