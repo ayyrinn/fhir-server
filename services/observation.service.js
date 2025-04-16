@@ -2,162 +2,6 @@ const { loggers, resolveSchema } = require("@bluehalo/node-fhir-server-core");
 const logger = loggers.get("default");
 const supabase = require("../db");
 
-// Simulated database for Observation
-// const db = {
-//   observations: [
-//     {
-//       _id: "O001",
-//       resourceType: "Observation",
-//       partOf: [
-//         {
-//           reference: "Procedure/PROC-987654",
-//           display: "CT Scan Procedure",
-//         },
-//       ],
-//       status: "final",
-//       subject: {
-//         reference: "Patient/12345",
-//         display: "John Doe",
-//       },
-//       effectiveDateTime: "2024-02-12T12:00:00Z",
-//       performer: [
-//         {
-//           reference: "Practitioner/45678",
-//           display: "Dr. Smith",
-//         },
-//       ],
-//       component: [
-//         {
-//           code: {
-//             coding: [
-//               {
-//                 system: "http://loinc.org",
-//                 code: "113733",
-//                 display: "CT Dose Length Product",
-//               },
-//             ],
-//           },
-//           valueQuantity: {
-//             value: 120.5,
-//             unit: "mGy·cm",
-//             system: "http://unitsofmeasure.org",
-//             code: "mGy·cm",
-//           },
-//         },
-//         {
-//           code: {
-//             coding: [
-//               {
-//                 system: "http://loinc.org",
-//                 code: "113730",
-//                 display: "CT Tube Current",
-//               },
-//             ],
-//           },
-//           valueQuantity: {
-//             value: 250,
-//             unit: "mA",
-//             system: "http://unitsofmeasure.org",
-//             code: "mA",
-//           },
-//         },
-//         {
-//           code: {
-//             coding: [
-//               {
-//                 system: "http://loinc.org",
-//                 code: "113731",
-//                 display: "CT Exposure Time",
-//               },
-//             ],
-//           },
-//           valueQuantity: {
-//             value: 1.5,
-//             unit: "s",
-//             system: "http://unitsofmeasure.org",
-//             code: "s",
-//           },
-//         },
-//       ],
-//     },
-//     {
-//       _id: "O002",
-//       resourceType: "Observation",
-//       partOf: [
-//         {
-//           reference: "Procedure/PROC-987655",
-//           display: "X-Ray Procedure",
-//         },
-//       ],
-//       status: "preliminary",
-//       subject: {
-//         reference: "Patient/67890",
-//         display: "Jane Doe",
-//       },
-//       effectiveDateTime: "2024-02-13T14:00:00Z",
-//       performer: [
-//         {
-//           reference: "Practitioner/12345",
-//           display: "Dr. John",
-//         },
-//       ],
-//       component: [
-//         {
-//           code: {
-//             coding: [
-//               {
-//                 system: "http://loinc.org",
-//                 code: "113734",
-//                 display: "X-Ray Dose Length Product",
-//               },
-//             ],
-//           },
-//           valueQuantity: {
-//             value: 150.3,
-//             unit: "mGy·cm",
-//             system: "http://unitsofmeasure.org",
-//             code: "mGy·cm",
-//           },
-//         },
-//         {
-//           code: {
-//             coding: [
-//               {
-//                 system: "http://loinc.org",
-//                 code: "113732",
-//                 display: "X-Ray Tube Current",
-//               },
-//             ],
-//           },
-//           valueQuantity: {
-//             value: 200,
-//             unit: "mA",
-//             system: "http://unitsofmeasure.org",
-//             code: "mA",
-//           },
-//         },
-//         {
-//           code: {
-//             coding: [
-//               {
-//                 system: "http://loinc.org",
-//                 code: "113735",
-//                 display: "X-Ray Exposure Time",
-//               },
-//             ],
-//           },
-//           valueQuantity: {
-//             value: 2.0,
-//             unit: "s",
-//             system: "http://unitsofmeasure.org",
-//             code: "s",
-//           },
-//         },
-//       ],
-//     },
-//   ],
-// };
-
 // search
 module.exports.search = async (args, context) => {
   try {
@@ -165,15 +9,14 @@ module.exports.search = async (args, context) => {
     let Bundle = resolveSchema(args.base_version, "bundle");
     let Observation = resolveSchema(args.base_version, "observation");
 
-    const result = await db.query("SELECT id, data FROM Observation");
+    const { data, error } = await supabase.rpc("search_observations");
 
-    let observations = result.rows.map((row) => {
-      let observationData = row.data;
-      observationData.id = row.id;
-      return new Observation(observationData);
-    });
+    if (error) {
+      throw error;
+    }
 
-    let entries = observations.map(
+    const observations = data.map((item) => new Observation(item));
+    const entries = observations.map(
       (observation) => new BundleEntry({ resource: observation })
     );
     return new Bundle({ entry: entries });
@@ -192,17 +35,19 @@ module.exports.searchById = async (args, context) => {
   let Observation = resolveSchema(args.base_version, "observation");
 
   try {
-    const result = await db.query(
-      "SELECT id, data FROM Observation WHERE id = $1",
-      [args.id]
-    );
+    const { data, error } = await supabase.rpc("search_observation_by_id", {
+      observation_id: args.id,
+    });
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw error;
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("Observation not found");
     }
 
-    let observationData = result.rows[0].data;
-    observationData.id = result.rows[0].id;
+    let observationData = data;
     return new Observation(observationData);
   } catch (error) {
     logger.error("Error searching observation by ID:", error);
@@ -216,13 +61,16 @@ module.exports.create = async (args, context) => {
   let doc = new Observation(context.req.body).toJSON();
 
   try {
-    const result = await db.query(
-      "INSERT INTO Observation (data) VALUES ($1) RETURNING id",
-      [JSON.stringify(doc)]
-    );
+    const { data, error } = await supabase.rpc("create_observation", {
+      payload: doc,
+    });
+
+    if (error) {
+      throw error;
+    }
 
     return {
-      id: result.rows[0].id,
+      id: data,
     };
   } catch (err) {
     console.error("Error creating Observation:", err);
@@ -232,20 +80,23 @@ module.exports.create = async (args, context) => {
 
 // update
 module.exports.update = async (args, context) => {
+  let Observation = resolveSchema(args.base_version, "observation");
+  let updatedObservation = new Observation(context.req.body).toJSON();
   try {
-    let Observation = resolveSchema(args.base_version, "observation");
-    let updatedObservation = new Observation(context.req.body).toJSON();
+    const { data, error } = await supabase.rpc("update_observation", {
+      payload: updatedObservation,
+      observation_id: args.id,
+    });
 
-    const result = await db.query(
-      "UPDATE Observation SET data = $1 WHERE id = $2 RETURNING id",
-      [updatedObservation, args.id]
-    );
+    if (error) {
+      throw error;
+    }
 
-    if (result.rows.length === 0) {
+    if (!data || data !== args.id) {
       throw new Error("Observation not found or update failed");
     }
 
-    return { id: args.id };
+    return { id: data };
   } catch (err) {
     logger.error("Error updating observation:", err);
     throw new Error(`Failed to update observation: ${err.message}`);
@@ -255,12 +106,17 @@ module.exports.update = async (args, context) => {
 // remove
 module.exports.remove = async (args, context) => {
   try {
-    const result = await db.query(
-      "DELETE FROM Observation WHERE id = $1 RETURNING id",
-      [args.id]
-    );
+    const { data, error } = await supabase
+      .from("observation")
+      .delete()
+      .eq("id", args.id)
+      .select("id");
 
-    if (result.rows.length === 0) {
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    if (!data || data.length === 0) {
       throw new Error("Observation not found or deletion failed");
     }
 
